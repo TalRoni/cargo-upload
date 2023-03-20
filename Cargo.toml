@@ -8,8 +8,6 @@ description = "Cargo tool for upload crate files to private registry (like crate
 authors = ["Tal Y Roni <tal.inon.16@gmail.com>"]
 readme = "README.md"
 license = "GPL-3.0"
-license-file = "LICENSE"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 env_logger = "0.10"
