@@ -15,12 +15,19 @@ Install with cargo:
 cargo install cargo-upload
 ```
 ## Usage
+First config your private registry in the `.cargo/config` file
 ```
-cargo upload --registry private-registry crate-file.crate
+[registries]
+my-registry = { index = "https://my-intranet:8080/git/index" }
+```
+See [Registries](https://doc.rust-lang.org/cargo/reference/registries.html) in the rust book for more information.
+
+The command below can upload single crate.
+```
+cargo upload --registry my-registry crate-file.crate
 ```
 
 ## Support
-
 
 ## Roadmap
 In the future we want to merge this command to cargo repository
