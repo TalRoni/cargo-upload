@@ -21,13 +21,8 @@ The command below can upload single crate.
 ```bash
 cargo upload --registry my-registry crate-file.crate
 ```
-
-## Support
-
 ## Roadmap
-In the future we want to merge this command to cargo repository
-
-## Contributing
+In the future we want to integrate this subcommand to the cargo repository.
 
 ## License
 The license GNU GENERAL PUBLIC LICENSE Version 3
