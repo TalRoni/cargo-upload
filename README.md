@@ -1,29 +1,24 @@
 # Cargo Upload
 
 ## Description
-An expansion tool for cargo to upload compressed crate to private registry (For example [Crates-Registry](https://gitlab.com/TalRoni/crates-registry)).
-In order to publish crates to a privates registry you want to download the crate and it's dependencies with `cargo vendor` then you can upload the files to a private registry with this expansion command.
-
-
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+A cargo subcommand for publishing compressed crate to private registry (For example [Crates-Registry](https://gitlab.com/TalRoni/crates-registry)).\
+In order to publish crates to a private registry you want to download the crate and it's dependencies (you can use `cargo download`) then you can upload the files to your private registry with this subcommand.
 
 ## Installation
-Install with cargo:
-```
-cargo install cargo-upload
+cargo-upload can be install with cargo:
+```bash
+$ cargo install cargo-upload
 ```
 ## Usage
 First config your private registry in the `.cargo/config` file
-```
+```toml
 [registries]
 my-registry = { index = "https://my-intranet:8080/git/index" }
 ```
 See [Registries](https://doc.rust-lang.org/cargo/reference/registries.html) in the rust book for more information.
 
 The command below can upload single crate.
-```
+```bash
 cargo upload --registry my-registry crate-file.crate
 ```
 
