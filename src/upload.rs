@@ -16,7 +16,6 @@ use cargo_util::paths;
 use crates_io::{self, NewCrate, NewCrateDependency, Registry};
 use flate2::read::GzDecoder;
 use itertools::Itertools;
-use log::info;
 use tar::Archive;
 use tempfile::TempDir;
 
@@ -30,7 +29,8 @@ pub fn upload(opts: UploadOpts) -> Result<()> {
     let mut krate = Archive::new(tar);
     let directory = TempDir::new()?;
     krate.unpack(directory.path())?;
-    let manifest_path = directory.path().join(crate_path.file_stem().unwrap()).join("Cargo.toml");
+    let crate_folder = std::fs::read_dir(directory)?.exactly_one().context("There is more then one folder")??;
+    let manifest_path = crate_folder.path().join("Cargo.toml");
     let ws = Workspace::new(&manifest_path, &config)?;
     let pkg = ws.members().exactly_one().map_err(|e| anyhow!("Packages error: {}", e))?;
     let mut publish_registry = opts.registry.clone();
