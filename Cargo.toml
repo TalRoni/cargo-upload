@@ -3,9 +3,12 @@ name = "cargo-upload"
 version = "0.1.0"
 edition = "2021"
 repository = "https://gitlab.com/TalRoni/cargo-upload"
+homepage = "https://gitlab.com/TalRoni/cargo-upload"
 description = "Cargo tool for upload crate files to private registry (like crates-registry)"
 authors = ["Tal Y Roni <tal.inon.16@gmail.com>"]
 readme = "README.md"
+license = "GPL-3.0"
+license-file = "LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
