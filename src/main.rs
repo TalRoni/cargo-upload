@@ -1,5 +1,6 @@
-use upload::upload;
 use clap::Parser;
+use itertools::Itertools;
+use upload::upload;
 
 mod upload;
 
@@ -21,7 +22,21 @@ pub struct UploadOpts {
 }
 
 fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
     env_logger::init();
-    let args = UploadOpts::parse();
+
+    // Skip upload subcommand keyword for using with cargo.
+    let args = std::env::args().collect_vec();
+    let args = if args
+        .get(1)
+        .and_then(|a| Some(a == "upload"))
+        .unwrap_or(false)
+    {
+        UploadOpts::parse_from(&args[1..])
+    } else {
+        UploadOpts::parse()
+    };
     upload(args).unwrap();
 }

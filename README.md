@@ -2,7 +2,7 @@
 
 ## Description
 A cargo subcommand for publishing compressed crate to private registry (For example [Crates-Registry](https://gitlab.com/TalRoni/crates-registry)).\
-In order to publish crates to a private registry you want to download the crate and it's dependencies (you can use `cargo download`) then you can upload the files to your private registry with this subcommand.
+In order to publish crates to a private registry you want to download the crate and it's dependencies (you can use [`cargo collect`](https://crates.io/crates/cargo-collect)) then you can upload the files to your private registry with this subcommand.
 
 ## Installation
 cargo-upload can be install with cargo:
