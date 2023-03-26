@@ -1,6 +1,6 @@
 [package]
 name = "cargo-upload"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 repository = "https://gitlab.com/TalRoni/cargo-upload"
 homepage = "https://gitlab.com/TalRoni/cargo-upload"
