@@ -19,8 +19,9 @@ See [Registries](https://doc.rust-lang.org/cargo/reference/registries.html) in t
 
 The command below can upload single crate.
 ```bash
-cargo upload --registry my-registry crate-file.crate
+cargo upload --registry my-registry -c crate-file.crate
 ```
+Run `cargo upload --help` for more information.
 ## Roadmap
 In the future we want to integrate this subcommand to the cargo repository.
 
