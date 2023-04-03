@@ -29,7 +29,7 @@ pub fn upload(opts: UploadOpts) -> Result<()> {
     let mut krate = Archive::new(tar);
     let directory = TempDir::new()?;
     krate.unpack(directory.path())?;
-    let crate_folder = std::fs::read_dir(directory)?.exactly_one().context("There is more then one folder")??;
+    let crate_folder = std::fs::read_dir(directory.path())?.exactly_one().context("There is more then one folder")??;
     let manifest_path = crate_folder.path().join("Cargo.toml");
     let ws = Workspace::new(&manifest_path, &config)?;
     let pkg = ws.members().exactly_one().map_err(|e| anyhow!("Packages error: {}", e))?;
@@ -257,11 +257,10 @@ fn transmit(
     } = *manifest.metadata();
     let readme_content = readme
         .as_ref()
-        .map(|readme| {
+        .and_then(|readme| {
             paths::read(&pkg.root().join(readme))
-                .with_context(|| format!("failed to read `readme` file for package `{}`", pkg))
-        })
-        .transpose()?;
+                .with_context(|| format!("failed to read `readme` file for package `{}`", pkg)).ok()
+        });
     if let Some(ref file) = *license_file {
         if !pkg.root().join(file).exists() {
             bail!("the license file `{}` does not exist", file)
