@@ -1,38 +1,64 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str;
 use std::task::Poll;
 
 use anyhow::{anyhow, bail, format_err, Context as _, Result};
 use cargo::core::dependency::DepKind;
 use cargo::core::manifest::ManifestMetadata;
-use cargo::core::{Package, Workspace, SourceId, Dependency, QueryKind, Source};
-use cargo::ops::http_handle;
-use cargo::sources::{CRATES_IO_REGISTRY, CRATES_IO_DOMAIN, SourceConfigMap, RegistrySource};
-use cargo::util::auth::{Secret, self};
+use cargo::core::{Dependency, Package, QueryKind, Source, SourceId, Workspace};
+use cargo::sources::{RegistrySource, SourceConfigMap, CRATES_IO_DOMAIN, CRATES_IO_REGISTRY};
+use cargo::util::auth::{self, Secret};
+use cargo::util::network::http::http_handle;
 use cargo::util::{Config, IntoUrl};
 use cargo_util::paths;
 use crates_io::{self, NewCrate, NewCrateDependency, Registry};
 use flate2::read::GzDecoder;
+use glob::glob;
 use itertools::Itertools;
+use log::{error, info};
 use tar::Archive;
 use tempfile::TempDir;
 
 use crate::UploadOpts;
 
 pub fn upload(opts: UploadOpts) -> Result<()> {
+    for entry in glob(&opts.crates_path)? {
+        let crate_path = entry?;
+        if crate_path.ends_with(".crate") {
+            info!("Upload crate: {}", crate_path.display());
+            match upload_crate(&crate_path, &opts) {
+                Ok(_) => {}
+                Err(err) => {
+                    error!("Failed to upload: {}", crate_path.display());
+                    if !opts.keep_going {
+                        return Err(err);
+                    }
+                }
+            };
+        }
+    }
+    Ok(())
+}
+
+pub fn upload_crate(crate_path: &Path, opts: &UploadOpts) -> Result<()> {
     let config = cargo::Config::default()?;
-    let crate_path = PathBuf::from(opts.crate_path);
+    let crate_path = PathBuf::from(crate_path);
     let tar_gz = File::open(&crate_path)?;
     let tar = GzDecoder::new(tar_gz);
     let mut krate = Archive::new(tar);
     let directory = TempDir::new()?;
     krate.unpack(directory.path())?;
-    let crate_folder = std::fs::read_dir(directory.path())?.exactly_one().context("There is more then one folder")??;
+    let crate_folder = std::fs::read_dir(directory.path())?
+        .exactly_one()
+        .context("There is more then one folder")??;
     let manifest_path = crate_folder.path().join("Cargo.toml");
     let ws = Workspace::new(&manifest_path, &config)?;
-    let pkg = ws.members().exactly_one().map_err(|e| anyhow!("Packages error: {}", e))?;
+    let pkg = ws
+        .members()
+        .exactly_one()
+        .map_err(|e| anyhow!("Packages error: {}", e))?;
     let mut publish_registry = opts.registry.clone();
     if let Some(ref allowed_registries) = *pkg.publish() {
         if publish_registry.is_none() && allowed_registries.len() == 1 {
@@ -254,13 +280,13 @@ fn transmit(
         ref categories,
         ref badges,
         ref links,
+        ref rust_version,
     } = *manifest.metadata();
-    let readme_content = readme
-        .as_ref()
-        .and_then(|readme| {
-            paths::read(&pkg.root().join(readme))
-                .with_context(|| format!("failed to read `readme` file for package `{}`", pkg)).ok()
-        });
+    let readme_content = readme.as_ref().and_then(|readme| {
+        paths::read(&pkg.root().join(readme))
+            .with_context(|| format!("failed to read `readme` file for package `{}`", pkg))
+            .ok()
+    });
     if let Some(ref file) = *license_file {
         if !pkg.root().join(file).exists() {
             bail!("the license file `{}` does not exist", file)
@@ -306,6 +332,7 @@ fn transmit(
                 license_file: license_file.clone(),
                 badges: badges.clone(),
                 links: links.clone(),
+                rust_version: rust_version.clone(),
             },
             tarball,
         )

@@ -7,10 +7,12 @@ mod upload;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct UploadOpts {
+    /// Path to specific crate file or folder with crate files.
     #[arg(short, long)]
-    pub crate_path: String,
+    pub crates_path: String,
     #[arg(short, long)]
     pub token: Option<String>,
+    /// The registry name in the cargo config (see https://doc.rust-lang.org/cargo/reference/registries.html)
     #[arg(short, long)]
     pub index: Option<String>,
     #[arg(short, long)]
