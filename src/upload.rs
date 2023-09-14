@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str;
 use std::task::Poll;
 
@@ -15,36 +15,65 @@ use cargo::util::{Config, IntoUrl};
 use cargo_util::paths;
 use crates_io::{self, NewCrate, NewCrateDependency, Registry};
 use flate2::read::GzDecoder;
-use glob::glob;
+use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle, ProgressFinish};
 use itertools::Itertools;
-use log::{error, info};
+use log::{info, warn};
 use tar::Archive;
 use tempfile::TempDir;
 
 use crate::UploadOpts;
 
-pub fn upload(opts: UploadOpts) -> Result<()> {
-    for entry in glob(&opts.crates_path)? {
-        let crate_path = entry?;
-        if crate_path.ends_with(".crate") {
-            info!("Upload crate: {}", crate_path.display());
-            match upload_crate(&crate_path, &opts) {
-                Ok(_) => {}
-                Err(err) => {
-                    error!("Failed to upload: {}", crate_path.display());
-                    if !opts.keep_going {
-                        return Err(err);
-                    }
+fn progress_bar(size: usize) -> ProgressBar {
+    ProgressBar::new(size as u64)
+        .with_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .expect("template is correct")
+                .progress_chars("#>-"),
+        )
+        .with_finish(ProgressFinish::AndLeave)
+}
+
+pub async fn upload(opts: UploadOpts) -> Result<()> {
+    let crate_paths = opts.crate_paths.iter().cloned().filter(|p| p.ends_with(".crate")).collect_vec();
+    info!("Upload {} crates to {} index", crate_paths.len(), opts.index.clone().unwrap_or(String::from("crate.io")));
+
+    let pb = progress_bar(crate_paths.len());
+    let tasks = futures::stream::iter(crate_paths.into_iter())
+        .map(|crate_path| {
+            let pb = pb.clone();
+            let opts = opts.clone();
+            tokio::spawn(async move {
+                upload_crate(&crate_path, &opts)?;
+                pb.inc(1);
+                Ok::<_, anyhow::Error>(())
+            })
+        })
+        .buffer_unordered(16)
+        .collect::<Vec<_>>()
+        .await;
+
+    for t in tasks {
+        match t.unwrap() {
+            Ok(_) => {}
+            Err(err) => {
+                if opts.keep_going {
+                    warn!("Can't upload crate: {}", err);
+                } else {
+                    return Err(err);
                 }
-            };
+            }
         }
     }
+    pb.finish();
     Ok(())
 }
 
-pub fn upload_crate(crate_path: &Path, opts: &UploadOpts) -> Result<()> {
+pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts) -> Result<()> {
     let config = cargo::Config::default()?;
-    let crate_path = PathBuf::from(crate_path);
+    config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
     let tar_gz = File::open(&crate_path)?;
     let tar = GzDecoder::new(tar_gz);
     let mut krate = Archive::new(tar);
@@ -101,7 +130,7 @@ pub fn upload_crate(crate_path: &Path, opts: &UploadOpts) -> Result<()> {
 
     let (mut registry, reg_ids) = registry(
         &config,
-        opts.token.as_ref().map(String::as_str).map(Secret::from),
+        opts.token.as_deref().map(Secret::from),
         opts.index.as_deref(),
         publish_registry.as_deref(),
         true,
@@ -109,7 +138,7 @@ pub fn upload_crate(crate_path: &Path, opts: &UploadOpts) -> Result<()> {
     )?;
     verify_dependencies(pkg, &registry, reg_ids.original)?;
 
-    let tarball = File::open(&crate_path)?;
+    let tarball = File::open(crate_path)?;
     if !opts.dry_run {
         let hash = cargo_util::Sha256::new()
             .update_file(&tarball)?
@@ -127,9 +156,6 @@ pub fn upload_crate(crate_path: &Path, opts: &UploadOpts) -> Result<()> {
         )?));
     }
 
-    config
-        .shell()
-        .status("Uploading", pkg.package_id().to_string())?;
     transmit(
         &config,
         pkg,
@@ -383,7 +409,6 @@ fn wait_for_publish(
 
     let now = std::time::Instant::now();
     let sleep_time = std::time::Duration::from_secs(1);
-    let mut logged = false;
     loop {
         {
             let _lock = config.acquire_package_cache_lock()?;
@@ -417,18 +442,6 @@ fn wait_for_publish(
                 source_description
             ))?;
             break;
-        }
-
-        if !logged {
-            config.shell().status(
-                "Waiting",
-                format!(
-                    "on `{}` to propagate to {} (ctrl-c to wait asynchronously)",
-                    pkg.name(),
-                    source_description
-                ),
-            )?;
-            logged = true;
         }
         std::thread::sleep(sleep_time);
     }

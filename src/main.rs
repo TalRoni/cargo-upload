@@ -4,18 +4,17 @@ use upload::upload;
 
 mod upload;
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct UploadOpts {
-    /// Path to specific crate file or folder with crate files.
-    #[arg(short, long)]
-    pub crates_path: String,
+    /// Paths to crate files.
+    pub crate_paths: Vec<String>,
     #[arg(short, long)]
     pub token: Option<String>,
     /// The registry name in the cargo config (see https://doc.rust-lang.org/cargo/reference/registries.html)
     #[arg(short, long)]
     pub index: Option<String>,
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = true)]
     pub keep_going: bool,
     #[arg(short, long)]
     pub dry_run: bool,
@@ -23,7 +22,8 @@ pub struct UploadOpts {
     pub registry: Option<String>,
 }
 
-fn main() {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
@@ -33,12 +33,12 @@ fn main() {
     let args = std::env::args().collect_vec();
     let args = if args
         .get(1)
-        .and_then(|a| Some(a == "upload"))
+        .map(|a| a == "upload")
         .unwrap_or(false)
     {
         UploadOpts::parse_from(&args[1..])
     } else {
         UploadOpts::parse()
     };
-    upload(args).unwrap();
+    upload(args).await.unwrap();
 }
