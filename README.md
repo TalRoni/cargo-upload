@@ -1,11 +1,11 @@
 # Cargo Upload
 
 ## Description
-A cargo subcommand for publishing compressed crate to private registry (For example [Crates-Registry](https://gitlab.com/TalRoni/crates-registry)).\
-In order to publish crates to a private registry you want to download the crate and it's dependencies (you can use [`cargo collect`](https://crates.io/crates/cargo-collect)) then you can upload the files to your private registry with this subcommand.
+A cargo subcommand for publishing compressed a crate to a private registry (For example [Crates-Registry](https://github.com/TalRoni/crates-registry)).\
+To publish crates to a private registry you want to download the crate and its dependencies (you can use [`cargo collect`](https://crates.io/crates/cargo-collect)) then you can upload the files to your private registry with this subcommand.
 
 ## Installation
-cargo-upload can be install with cargo:
+cargo-upload can be installed via cargo:
 ```bash
 $ cargo install cargo-upload
 ```
@@ -17,13 +17,13 @@ my-registry = { index = "https://my-intranet:8080/git/index" }
 ```
 See [Registries](https://doc.rust-lang.org/cargo/reference/registries.html) in the rust book for more information.
 
-The command below can upload single crate.
+The command below can upload a single crate.
 ```bash
-cargo upload --registry my-registry -c crate-file.crate
+cargo upload --registry my-registry crate-file.crate
 ```
 Run `cargo upload --help` for more information.
 ## Roadmap
-In the future we want to integrate this subcommand to the cargo repository.
+In the future, we want to integrate this subcommand into the cargo repository.
 
 ## License
 The license GNU GENERAL PUBLIC LICENSE Version 3
