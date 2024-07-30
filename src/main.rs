@@ -7,7 +7,7 @@ mod upload;
 #[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct UploadOpts {
-    /// Paths to crate files.
+    /// Paths to crate files or folder that contain them
     pub crate_paths: Vec<String>,
     #[arg(short, long)]
     pub token: Option<String>,
