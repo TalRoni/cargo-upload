@@ -20,6 +20,9 @@ pub struct UploadOpts {
     pub dry_run: bool,
     #[arg(short, long)]
     pub registry: Option<String>,
+    /// Don't try to upload crates versions that already exists
+    #[arg(short, long)]
+    pub skip_existing: bool,
 }
 
 #[tokio::main(flavor = "multi_thread")]

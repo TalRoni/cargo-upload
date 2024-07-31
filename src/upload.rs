@@ -21,7 +21,8 @@ use itertools::Itertools;
 use log::{info, warn};
 use tar::Archive;
 use tempfile::TempDir;
-
+use reqwest::header::USER_AGENT;
+use reqwest::StatusCode;
 use crate::UploadOpts;
 
 fn progress_bar(size: usize) -> ProgressBar {
@@ -29,7 +30,7 @@ fn progress_bar(size: usize) -> ProgressBar {
         .with_style(
             ProgressStyle::with_template(
                 "{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-                )
+            )
                 .expect("template is correct")
                 .progress_chars("#>-"),
         )
@@ -136,6 +137,15 @@ pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts) -> Result<(
         true,
         Some(mutation).filter(|_| !opts.dry_run),
     )?;
+
+    if opts.skip_existing {
+        let exists = does_package_exists(&registry, pkg.name().as_str(), &ver)?;
+        if exists {
+            log::info!("Skipping crate {} version {} as it already exists", pkg.name(), ver);
+            return Ok(());
+        }
+    }
+
     verify_dependencies(pkg, &registry, reg_ids.original)?;
 
     let tarball = File::open(crate_path)?;
@@ -286,7 +296,7 @@ fn transmit(
                     DepKind::Build => "build",
                     DepKind::Development => "dev",
                 }
-                .to_string(),
+                    .to_string(),
                 registry: dep_registry,
                 explicit_name_in_toml: dep.explicit_name_in_toml().map(|s| s.to_string()),
             })
@@ -568,4 +578,92 @@ struct RegistrySourceIds {
     ///
     /// User-defined source replacement is not applied.
     replacement: SourceId,
+}
+
+fn does_package_exists(registry: &Registry, package_name: &str, version: &str) -> Result<bool> {
+    // Sending HEAD request to the following URL is enough
+    // <index-host>/api/v1/crates/<package-name>/<version>/download
+    // example: https://crates.io/api/v1/crates/serde/1.0.0/download
+
+    let host = registry.host();
+    let url = format!("{}/api/v1/crates/{}/{}", host, package_name, version);
+
+    let client = reqwest::blocking::Client::new();
+    let response_status = client
+        .head(url)
+        .header(USER_AGENT, "cargo-upload")
+        .send()?
+        .status();
+
+    if response_status == StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+
+    if response_status.is_success() {
+        return Ok(true);
+    }
+
+    return Err(anyhow!("Failed to check if package exists. Response status: {}", response_status).context("Failed to check if package exists"));
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::upload::*;
+
+    fn get_registry() -> Result<Registry> {
+        let config = cargo::Config::default()?;
+        config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
+        let publish_registry = Some(CRATES_IO_REGISTRY);
+        // This is only used to confirm that we can create a token before we build the package.
+        // This causes the credential provider to be called an extra time, but keeps the same order of errors.
+        let mutation = auth::Mutation::PrePublish;
+
+        let (registry, _) = registry(
+            &config,
+            None, // token
+            None, // index
+            publish_registry.as_deref(),
+            true,
+            Some(mutation),
+        )?;
+
+        return Ok(registry);
+    }
+
+    #[test]
+    fn should_return_true_for_existing_package_and_version() {
+        let package_name = "serde";
+        let package_version = "1.0.158";
+
+        let registry = get_registry().expect("should create registry");
+
+        let exists = does_package_exists(&registry, package_name, package_version).expect("Failed to check if package exists");
+
+        assert_eq!(exists, true);
+    }
+
+    #[test]
+    fn should_return_false_for_existing_package_but_missing_version() {
+        let package_name = "serde";
+        let package_version = "999.999.9999";
+
+        let registry = get_registry().expect("should create registry");
+
+        let exists = does_package_exists(&registry, package_name, package_version).expect("Failed to check if package exists");
+
+        assert_eq!(exists, false);
+    }
+
+    #[test]
+    fn should_return_false_for_missing_package() {
+        let package_name = "7fab7644-8c3b-4079-bdbb-72d9a9635396";
+        let package_version = "1.0.0";
+
+        let registry = get_registry().expect("should create registry");
+
+        let exists = does_package_exists(&registry, package_name, package_version).expect("Failed to check if package exists");
+
+        assert_eq!(exists, false);
+    }
 }
