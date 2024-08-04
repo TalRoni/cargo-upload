@@ -3,6 +3,7 @@ use itertools::Itertools;
 use upload::upload;
 
 mod upload;
+mod parse_cargo_toml;
 
 #[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
