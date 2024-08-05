@@ -109,23 +109,32 @@ fn get_pkg(crate_path: impl AsRef<Path>) -> Result<crate::parse_cargo_toml::Pack
     let tar_gz = File::open(&crate_path)?;
     let tar = GzDecoder::new(tar_gz);
     let mut krate = Archive::new(tar);
+
+    let mut found = false;
     for entry in krate.entries()? {
         let mut file = entry?;
         let file_path: Cow<'_, std::path::Path> = file.path()?;
+
+        let c = file_path.components().collect_vec();
 
         // If Cargo.toml is inside the root folder
         // Match
         // "heck-0.5.0/Cargo.toml"
         //
-        // But DOESNT match:
+        // Not matched:
         // "heck-0.5.0/abc/Cargo.toml"
         // "/heck-0.5.0/Cargo.toml"
         // "Cargo.toml"
         // "/Cargo.toml"
-        if file_path.to_str().unwrap().to_string().ends_with("/Cargo.toml") {
+        if c.len() == 2 && c[1].as_os_str() == "Cargo.toml" {
+            found = true;
             file.unpack(directory.path().join("Cargo.toml"))?;
             break;
         }
+    }
+
+    if !found {
+        return Err(anyhow!("Cargo.toml not found in the root folder of the crate"));
     }
 
     let manifest_path = directory.path().join("Cargo.toml");
