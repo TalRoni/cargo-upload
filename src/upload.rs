@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str;
 use std::task::Poll;
 
@@ -16,7 +16,7 @@ use cargo_util::paths;
 use crates_io::{self, NewCrate, NewCrateDependency, Registry};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle, ProgressFinish};
+use indicatif::{ProgressBar, ProgressFinish, ProgressStyle};
 use itertools::Itertools;
 use log::{info, warn};
 use tar::Archive;
@@ -36,9 +36,47 @@ fn progress_bar(size: usize) -> ProgressBar {
         .with_finish(ProgressFinish::AndLeave)
 }
 
+fn get_crate_paths(crate_paths: &Vec<String>) -> Vec<String> {
+    return crate_paths
+        .iter()
+        .flat_map(move |p| {
+            // Check if folder
+            if PathBuf::from(p).is_dir() {
+                let dir = std::fs::read_dir(p).expect("Failed to read directory");
+
+                return dir
+                    .filter_map(|entry| {
+                        let entry = entry.expect("Failed to read entry");
+                        let path = entry.path();
+
+                        if !path.is_file() {
+                            return None;
+                        }
+
+
+                        return Some(path.to_string_lossy().to_string());
+                    })
+                    .collect_vec();
+            }
+
+            return vec![p.to_string()];
+        })
+        .filter(|p| p.ends_with(".crate"))
+        .collect_vec();
+}
+
 pub async fn upload(opts: UploadOpts) -> Result<()> {
-    let crate_paths = opts.crate_paths.iter().cloned().filter(|p| p.ends_with(".crate")).collect_vec();
-    info!("Upload {} crates to {} index", crate_paths.len(), opts.index.clone().unwrap_or(String::from("crate.io")));
+    let crate_paths = get_crate_paths(&opts.crate_paths);
+
+    if crate_paths.is_empty() {
+        bail!("No crate files found");
+    }
+
+    info!(
+        "Upload {} crates to {} index",
+        crate_paths.len(),
+        opts.index.clone().unwrap_or(String::from("crate.io"))
+    );
 
     let pb = progress_bar(crate_paths.len());
     let tasks = futures::stream::iter(crate_paths.into_iter())
