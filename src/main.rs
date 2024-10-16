@@ -3,6 +3,7 @@ use itertools::Itertools;
 use upload::upload;
 
 mod upload;
+mod parse_cargo_toml;
 
 #[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -20,6 +21,9 @@ pub struct UploadOpts {
     pub dry_run: bool,
     #[arg(short, long)]
     pub registry: Option<String>,
+    /// Don't try to upload crates versions that already exists
+    #[arg(short, long)]
+    pub skip_existing: bool,
 }
 
 #[tokio::main(flavor = "multi_thread")]

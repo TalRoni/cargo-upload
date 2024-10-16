@@ -7,7 +7,7 @@ use std::task::Poll;
 use anyhow::{anyhow, bail, format_err, Context as _, Result};
 use cargo::core::dependency::DepKind;
 use cargo::core::manifest::ManifestMetadata;
-use cargo::core::{Dependency, Package, QueryKind, Source, SourceId, Workspace};
+use cargo::core::{Dependency, EitherManifest, Package, PackageId, QueryKind, Source, SourceId, Workspace};
 use cargo::sources::{RegistrySource, SourceConfigMap, CRATES_IO_DOMAIN, CRATES_IO_REGISTRY};
 use cargo::util::auth::{self, Secret};
 use cargo::util::network::http::http_handle;
@@ -21,15 +21,21 @@ use itertools::Itertools;
 use log::{info, warn};
 use tar::Archive;
 use tempfile::TempDir;
-
+use reqwest::header::USER_AGENT;
+use reqwest::StatusCode;
+use crate::parse_cargo_toml::get_package_id;
 use crate::UploadOpts;
+use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::borrow::Cow;
 
 fn progress_bar(size: usize) -> ProgressBar {
     ProgressBar::new(size as u64)
         .with_style(
             ProgressStyle::with_template(
                 "{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-                )
+            )
                 .expect("template is correct")
                 .progress_chars("#>-"),
         )
@@ -78,14 +84,32 @@ pub async fn upload(opts: UploadOpts) -> Result<()> {
         opts.index.clone().unwrap_or(String::from("crate.io"))
     );
 
+    let skipped = Arc::new(AtomicUsize::new(0));
+
+    let registry_host = {
+        let config = cargo::Config::default()?;
+        config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
+
+        get_registry_url(&config, opts.index.as_deref(), opts.registry.as_deref()).expect("get registry does not work")
+    };
+
     let pb = progress_bar(crate_paths.len());
     let tasks = futures::stream::iter(crate_paths.into_iter())
         .map(|crate_path| {
             let pb = pb.clone();
             let opts = opts.clone();
-            tokio::spawn(async move {
-                upload_crate(&crate_path, &opts)?;
+            let s = skipped.clone();
+            let r = registry_host.clone();
+
+            tokio::task::spawn_blocking(move || {
+                let added = upload_crate(&crate_path, &opts, &r)?;
+
+                if !added {
+                    s.fetch_add(1, Ordering::SeqCst);
+                }
+
                 pb.inc(1);
+
                 Ok::<_, anyhow::Error>(())
             })
         })
@@ -106,16 +130,75 @@ pub async fn upload(opts: UploadOpts) -> Result<()> {
         }
     }
     pb.finish();
+
+    if opts.skip_existing {
+        println!("{} crates skipped as already exists", skipped.load(Ordering::SeqCst));
+    }
+
     Ok(())
 }
 
-pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts) -> Result<()> {
+fn get_pkg(crate_path: impl AsRef<Path>) -> Result<crate::parse_cargo_toml::Package> {
     let config = cargo::Config::default()?;
     config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
+
+    let directory = TempDir::new()?;
+
+    let tar_gz = File::open(&crate_path)?;
+    let tar = GzDecoder::new(tar_gz);
+    let mut krate = Archive::new(tar);
+
+    let mut found = false;
+    for entry in krate.entries()? {
+        let mut file = entry?;
+        let file_path: Cow<'_, std::path::Path> = file.path()?;
+
+        let c = file_path.components().collect_vec();
+
+        // If Cargo.toml is inside the root folder
+        // Match
+        // "heck-0.5.0/Cargo.toml"
+        //
+        // Not matched:
+        // "heck-0.5.0/abc/Cargo.toml"
+        // "/heck-0.5.0/Cargo.toml"
+        // "Cargo.toml"
+        // "/Cargo.toml"
+        if c.len() == 2 && c[1].as_os_str() == "Cargo.toml" {
+            found = true;
+            file.unpack(directory.path().join("Cargo.toml"))?;
+            break;
+        }
+    }
+
+    if !found {
+        return Err(anyhow!("Cargo.toml not found in the root folder of the crate"));
+    }
+
+    let manifest_path = directory.path().join("Cargo.toml");
+
+    return get_package_id(manifest_path);
+}
+
+pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts, registry_host: &String) -> Result<bool> {
+    let config = cargo::Config::default()?;
+    config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
+
+    if opts.skip_existing {
+        let publish_registry = opts.registry.clone();
+        let registry_host = get_registry_url(&config, opts.index.as_deref(), publish_registry.as_deref()).expect("get registry does not work");
+        let pkg = get_pkg(&crate_path).expect("Get package should work");
+        let exists = does_package_exists(registry_host, pkg).expect("Does package exists should work");
+        if exists {
+            return Ok(false);
+        }
+    }
+
     let tar_gz = File::open(&crate_path)?;
     let tar = GzDecoder::new(tar_gz);
     let mut krate = Archive::new(tar);
     let directory = TempDir::new()?;
+
     krate.unpack(directory.path())?;
     let crate_folder = std::fs::read_dir(directory.path())?
         .exactly_one()
@@ -174,6 +257,7 @@ pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts) -> Result<(
         true,
         Some(mutation).filter(|_| !opts.dry_run),
     )?;
+
     verify_dependencies(pkg, &registry, reg_ids.original)?;
 
     let tarball = File::open(crate_path)?;
@@ -216,7 +300,7 @@ pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts) -> Result<(
         }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// Returns true if the dependency is either git or path, false otherwise
@@ -324,7 +408,7 @@ fn transmit(
                     DepKind::Build => "build",
                     DepKind::Development => "dev",
                 }
-                .to_string(),
+                    .to_string(),
                 registry: dep_registry,
                 explicit_name_in_toml: dep.explicit_name_in_toml().map(|s| s.to_string()),
             })
@@ -487,6 +571,34 @@ fn wait_for_publish(
     Ok(())
 }
 
+fn get_registry_url(
+    config: &Config,
+    index: Option<&str>,
+    registry: Option<&str>,
+) -> Result<String> {
+    let source_ids = get_source_id(config, index, registry)?;
+
+    let cfg = {
+        let _lock = config.acquire_package_cache_lock()?;
+        let mut src = RegistrySource::remote(source_ids.replacement, &HashSet::new(), config)?;
+
+        let cfg = loop {
+            match src.config()? {
+                Poll::Pending => src
+                    .block_until_ready()
+                    .with_context(|| format!("failed to update {}", source_ids.replacement))?,
+                Poll::Ready(cfg) => break cfg,
+            }
+        };
+        cfg.expect("remote registries must have config")
+    };
+    let api_host = cfg
+        .api
+        .ok_or_else(|| format_err!("{} does not support API commands", source_ids.replacement))?;
+
+    return Ok(api_host);
+}
+
 /// Returns the `Registry` and `Source` based on command-line and config settings.
 ///
 /// * `token_from_cmdline`: The token from the command-line. If not set, uses the token
@@ -606,4 +718,103 @@ struct RegistrySourceIds {
     ///
     /// User-defined source replacement is not applied.
     replacement: SourceId,
+}
+
+
+fn does_package_exists(registry_host: String, pkg: crate::parse_cargo_toml::Package) -> Result<bool> {
+    // Sending HEAD request to the following URL is enough
+    // <index-host>/api/v1/crates/<package-name>/<version>/download
+    // example: https://crates.io/api/v1/crates/serde/1.0.0/download
+
+    let host = registry_host;
+    let url = format!("{}/api/v1/crates/{}/{}/download", host, pkg.name, pkg.version);
+
+    let client = reqwest::blocking::Client::new();
+    let response_status = client
+        .head(url)
+        .header(USER_AGENT, "cargo-upload")
+        .send()?
+        .status();
+
+    if response_status == StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+
+    if response_status.is_success() {
+        return Ok(true);
+    }
+
+    return Err(anyhow!("Failed to check if package exists. Response status: {}", response_status).context("Failed to check if package exists"));
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::parse_cargo_toml;
+    use crate::upload::*;
+
+    fn get_registry() -> Result<Registry> {
+        let config = cargo::Config::default()?;
+        config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
+        let publish_registry = Some(CRATES_IO_REGISTRY);
+        // This is only used to confirm that we can create a token before we build the package.
+        // This causes the credential provider to be called an extra time, but keeps the same order of errors.
+        let mutation = auth::Mutation::PrePublish;
+
+        let (registry, _) = registry(
+            &config,
+            None, // token
+            None, // index
+            publish_registry.as_deref(),
+            true,
+            Some(mutation),
+        )?;
+
+        return Ok(registry);
+    }
+
+    #[test]
+    fn should_return_true_for_existing_package_and_version() {
+        let package_name = "serde";
+        let package_version = "1.0.158";
+
+        let registry = "https://crates.io".to_string();
+
+        let exists = does_package_exists(registry.to_string(), parse_cargo_toml::Package {
+            name: package_name.to_string(),
+            version: package_version.to_string(),
+        }).expect("Failed to check if package exists");
+
+        assert_eq!(exists, true);
+    }
+
+    #[test]
+    fn should_return_false_for_existing_package_but_missing_version() {
+        let package_name = "serde";
+        let package_version = "999.999.9999";
+
+        let registry = "https://crates.io".to_string();
+
+        let exists = does_package_exists(registry.to_string(), parse_cargo_toml::Package {
+            name: package_name.to_string(),
+            version: package_version.to_string(),
+        }).expect("Failed to check if package exists");
+
+        assert_eq!(exists, false);
+    }
+
+    #[test]
+    fn should_return_false_for_missing_package() {
+        let package_name = "7fab7644-8c3b-4079-bdbb-72d9a9635396";
+        let package_version = "1.0.0";
+
+        let registry = "https://crates.io".to_string();
+
+        let exists = does_package_exists(registry.to_string(), parse_cargo_toml::Package {
+            name: package_name.to_string(),
+            version: package_version.to_string(),
+        }).expect("Failed to check if package exists");
+
+        assert_eq!(exists, false);
+    }
 }
