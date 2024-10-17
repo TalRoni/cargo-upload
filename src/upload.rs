@@ -7,7 +7,7 @@ use std::task::Poll;
 use anyhow::{anyhow, bail, format_err, Context as _, Result};
 use cargo::core::dependency::DepKind;
 use cargo::core::manifest::ManifestMetadata;
-use cargo::core::{Dependency, EitherManifest, Package, PackageId, QueryKind, Source, SourceId, Workspace};
+use cargo::core::{Dependency, Package, QueryKind, Source, SourceId, Workspace};
 use cargo::sources::{RegistrySource, SourceConfigMap, CRATES_IO_DOMAIN, CRATES_IO_REGISTRY};
 use cargo::util::auth::{self, Secret};
 use cargo::util::network::http::http_handle;
@@ -180,13 +180,11 @@ fn get_pkg(crate_path: impl AsRef<Path>) -> Result<crate::parse_cargo_toml::Pack
     return get_package_id(manifest_path);
 }
 
-pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts, registry_host: &String) -> Result<bool> {
+pub fn upload_crate(crate_path: impl AsRef<Path>, opts: &UploadOpts, registry_host: &str) -> Result<bool> {
     let config = cargo::Config::default()?;
     config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
 
     if opts.skip_existing {
-        let publish_registry = opts.registry.clone();
-        let registry_host = get_registry_url(&config, opts.index.as_deref(), publish_registry.as_deref()).expect("get registry does not work");
         let pkg = get_pkg(&crate_path).expect("Get package should work");
         let exists = does_package_exists(registry_host, pkg).expect("Does package exists should work");
         if exists {
@@ -721,7 +719,7 @@ struct RegistrySourceIds {
 }
 
 
-fn does_package_exists(registry_host: String, pkg: crate::parse_cargo_toml::Package) -> Result<bool> {
+fn does_package_exists(registry_host: &str, pkg: crate::parse_cargo_toml::Package) -> Result<bool> {
     // Sending HEAD request to the following URL is enough
     // <index-host>/api/v1/crates/<package-name>/<version>/download
     // example: https://crates.io/api/v1/crates/serde/1.0.0/download

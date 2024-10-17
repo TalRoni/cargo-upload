@@ -2,8 +2,8 @@
 name = "cargo-upload"
 version = "0.1.4"
 edition = "2021"
-repository = "https://gitlab.com/TalRoni/cargo-upload"
-homepage = "https://gitlab.com/TalRoni/cargo-upload"
+repository = "https://github.com/TalRoni/cargo-upload"
+homepage = "https://github.com/TalRoni/cargo-upload"
 description = "Cargo tool for upload crate files to private registry (like crates-registry)"
 authors = ["Tal Y Roni <tal.inon.16@gmail.com>"]
 readme = "README.md"
