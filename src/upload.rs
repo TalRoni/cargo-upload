@@ -725,7 +725,7 @@ fn does_package_exists(registry_host: &str, pkg: crate::parse_cargo_toml::Packag
     // example: https://crates.io/api/v1/crates/serde/1.0.0/download
 
     let host = registry_host;
-    let url = format!("{}/api/v1/crates/{}/{}/download", host, pkg.name, pkg.version);
+    let url = format!("{}/api/v1/crates/{}/{}", host, pkg.name, pkg.version);
 
     let client = reqwest::blocking::Client::new();
     let response_status = client
@@ -751,34 +751,14 @@ mod tests {
     use crate::parse_cargo_toml;
     use crate::upload::*;
 
-    fn get_registry() -> Result<Registry> {
-        let config = cargo::Config::default()?;
-        config.shell().set_verbosity(cargo::core::Verbosity::Quiet);
-        let publish_registry = Some(CRATES_IO_REGISTRY);
-        // This is only used to confirm that we can create a token before we build the package.
-        // This causes the credential provider to be called an extra time, but keeps the same order of errors.
-        let mutation = auth::Mutation::PrePublish;
-
-        let (registry, _) = registry(
-            &config,
-            None, // token
-            None, // index
-            publish_registry.as_deref(),
-            true,
-            Some(mutation),
-        )?;
-
-        return Ok(registry);
-    }
-
     #[test]
     fn should_return_true_for_existing_package_and_version() {
         let package_name = "serde";
         let package_version = "1.0.158";
 
-        let registry = "https://crates.io".to_string();
+        let registry = "https://crates.io";
 
-        let exists = does_package_exists(registry.to_string(), parse_cargo_toml::Package {
+        let exists = does_package_exists(registry, parse_cargo_toml::Package {
             name: package_name.to_string(),
             version: package_version.to_string(),
         }).expect("Failed to check if package exists");
@@ -791,12 +771,12 @@ mod tests {
         let package_name = "serde";
         let package_version = "999.999.9999";
 
-        let registry = "https://crates.io".to_string();
+        let registry = "https://crates.io";
 
-        let exists = does_package_exists(registry.to_string(), parse_cargo_toml::Package {
+        let exists = does_package_exists(registry, parse_cargo_toml::Package {
             name: package_name.to_string(),
             version: package_version.to_string(),
-        }).expect("Failed to check if package exists");
+        }).unwrap();
 
         assert_eq!(exists, false);
     }
@@ -806,12 +786,12 @@ mod tests {
         let package_name = "7fab7644-8c3b-4079-bdbb-72d9a9635396";
         let package_version = "1.0.0";
 
-        let registry = "https://crates.io".to_string();
+        let registry = "https://crates.io";
 
-        let exists = does_package_exists(registry.to_string(), parse_cargo_toml::Package {
+        let exists = does_package_exists(registry, parse_cargo_toml::Package {
             name: package_name.to_string(),
             version: package_version.to_string(),
-        }).expect("Failed to check if package exists");
+        }).unwrap();
 
         assert_eq!(exists, false);
     }
